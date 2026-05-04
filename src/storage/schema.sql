@@ -1,0 +1,29 @@
+CREATE TABLE IF NOT EXISTS skills (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  category TEXT NOT NULL,
+  triggers TEXT NOT NULL,
+  content TEXT NOT NULL,
+  version INTEGER DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  usage_count INTEGER DEFAULT 0,
+  quality_score REAL DEFAULT 0.0,
+  file_path TEXT
+);
+
+CREATE TABLE IF NOT EXISTS skill_links (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  skill_id INTEGER REFERENCES skills(id) ON DELETE CASCADE,
+  link_type TEXT NOT NULL,
+  link_path TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS skill_usage_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  skill_id INTEGER REFERENCES skills(id) ON DELETE CASCADE,
+  usage_context TEXT,
+  quality_score_after REAL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
