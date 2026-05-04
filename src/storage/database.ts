@@ -2,6 +2,9 @@ import { Database } from 'bun:sqlite';
 import { homedir } from 'os';
 import { mkdirSync, existsSync } from 'fs';
 import { dirname } from 'path';
+import { createLogger } from '../logger';
+
+const log = createLogger('Database');
 
 let db: Database | null = null;
 
@@ -63,5 +66,6 @@ export function closeDatabase(): void {
   if (db) {
     db.close();
     db = null;
+    log.info('database closed');
   }
 }

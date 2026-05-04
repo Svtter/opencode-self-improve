@@ -1,6 +1,9 @@
 import type { SkillStore, Skill } from './skill-store';
 import type { PluginConfig } from './config/schema';
 import type { RubricScorer } from './rubric-scorer';
+import { createLogger } from './logger';
+
+const log = createLogger('Curator');
 
 export class Curator {
   private intervalId: ReturnType<typeof setInterval> | null = null;
@@ -12,11 +15,15 @@ export class Curator {
   ) {}
 
   start(): void {
-    if (!this.config.curator.enabled) return;
+    if (!this.config.curator.enabled) {
+      log.info('curator disabled, skipping start');
+      return;
+    }
     const intervalMs = this.config.curator.intervalDays * 24 * 60 * 60 * 1000;
+    log.info('starting periodic cleanup', { intervalDays: this.config.curator.intervalDays });
     this.intervalId = setInterval(() => {
       this.runCleanup().catch(err => {
-        console.error('[Curator] cleanup failed:', err);
+        log.error('cleanup failed', err instanceof Error ? err.message : err);
       });
     }, intervalMs);
   }
@@ -55,7 +62,7 @@ export class Curator {
       merged += mergeResult;
     }
 
-    console.log(`[Curator] cleanup complete: rescored=${rescored}, removed=${removed}, merged=${merged}`);
+    log.info('cleanup complete', { rescored, removed, merged });
     return { removed, merged, rescored };
   }
 
@@ -116,6 +123,7 @@ export class Curator {
   }
 
   private mergeSkills(keep: Skill, remove: Skill): void {
+    log.info('merging duplicate skills', { keep: keep.id, keepName: keep.name, remove: remove.id, removeName: remove.name });
     const mergedContent = `${keep.content}\n\n## Alternative Approach\n\n${remove.content}`;
     this.skillStore.updateSkill(keep.id, {
       content: mergedContent,

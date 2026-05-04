@@ -9,6 +9,7 @@ import { SkillForge } from './skill-forge';
 import { Curator } from './curator';
 import { SkillInjector } from './skill-injector';
 import { SubagentRunner } from './subagent-runner';
+import { createLogger, setLogLevel } from './logger';
 import { skillCreate } from './tools/skill-create';
 import { skillSearch } from './tools/skill-search';
 import { skillUpdate } from './tools/skill-update';
@@ -18,8 +19,15 @@ import { skillStatus } from './commands/skill-status';
 import { skillReview } from './commands/skill-review';
 import { skillDiff } from './commands/skill-diff';
 
+const log = createLogger('Plugin');
+
 export const SelfImprovePlugin: Plugin = async (_input: PluginInput) => {
   const config = loadConfig();
+  if (config.logLevel) {
+    setLogLevel(config.logLevel);
+  }
+
+  log.info('initializing plugin');
   const db = initializeDatabase(config.storage.dbPath);
 
   const scorer = new RubricScorer(config.rubric);
@@ -30,6 +38,11 @@ export const SelfImprovePlugin: Plugin = async (_input: PluginInput) => {
   const injector = new SkillInjector(config, skillStore);
 
   curator.start();
+  log.info('plugin initialized', {
+    curatorEnabled: config.curator.enabled,
+    skillForgeEnabled: config.skillForge.enabled,
+    dbPath: config.storage.dbPath,
+  });
 
   const hooks: Hooks = {
     // Inject relevant learned skills into the system prompt
@@ -37,6 +50,7 @@ export const SelfImprovePlugin: Plugin = async (_input: PluginInput) => {
       const context = output.system.join('\n');
       const injected = injector.injectSkills(context);
       if (injected !== context) {
+        log.info('injected skills into system prompt');
         output.system.push(injected.slice(context.length).trim());
       }
     },
@@ -59,6 +73,7 @@ export const SelfImprovePlugin: Plugin = async (_input: PluginInput) => {
         },
         async execute(args) {
           const result = skillCreate(args, skillStore);
+          log.info('skill created', { name: args.name, category: args.category });
           return JSON.stringify(result, null, 2);
         },
       }),
@@ -72,6 +87,7 @@ export const SelfImprovePlugin: Plugin = async (_input: PluginInput) => {
         },
         async execute(args) {
           const result = skillSearch(args, skillStore);
+          log.debug('skill search', { query: args.query, category: args.category, resultCount: Array.isArray(result) ? result.length : 0 });
           return JSON.stringify(result, null, 2);
         },
       }),
@@ -88,6 +104,7 @@ export const SelfImprovePlugin: Plugin = async (_input: PluginInput) => {
         },
         async execute(args) {
           const result = skillUpdate(args, skillStore);
+          log.info('skill updated', { id: args.id });
           return JSON.stringify(result, null, 2);
         },
       }),
