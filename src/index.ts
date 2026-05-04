@@ -1,3 +1,6 @@
+import type { Plugin, PluginInput, Hooks } from '@opencode-ai/plugin';
+import { tool } from '@opencode-ai/plugin';
+
 import { loadConfig } from './config';
 import { initializeDatabase, closeDatabase } from './storage';
 import { RubricScorer } from './rubric-scorer';
@@ -14,27 +17,11 @@ import { skillScore } from './tools/skill-score';
 import { skillStatus } from './commands/skill-status';
 import { skillReview } from './commands/skill-review';
 import { skillDiff } from './commands/skill-diff';
-import type { ExtensionAPI, BeforeAgentStartEvent, AgentEndEvent, ToolExecutionEndEvent, ExtensionContext } from './types';
 
-export type { ExtensionAPI } from './types';
-
-export interface SelfImproveDeps {
-  config: ReturnType<typeof loadConfig>;
-  skillStore: SkillStore;
-  scorer: RubricScorer;
-  forge: SkillForge;
-  curator: Curator;
-  injector: SkillInjector;
-}
-
-function wirePlugin(api: ExtensionAPI): { deps: SelfImproveDeps; cleanup: () => void } {
-  // Load config
+export const SelfImprovePlugin: Plugin = async (_input: PluginInput) => {
   const config = loadConfig();
-
-  // Initialize database
   const db = initializeDatabase(config.storage.dbPath);
 
-  // Create components
   const scorer = new RubricScorer(config.rubric);
   const skillStore = new SkillStore(db, config, scorer);
   const subagentRunner = new SubagentRunner();
@@ -42,155 +29,138 @@ function wirePlugin(api: ExtensionAPI): { deps: SelfImproveDeps; cleanup: () => 
   const curator = new Curator(config, skillStore, scorer);
   const injector = new SkillInjector(config, skillStore);
 
-  // Start curator timer
   curator.start();
 
-  // --- Register hooks ---
-
-  api.onBeforeAgentStart((event: BeforeAgentStartEvent, _ctx: ExtensionContext) => {
-    const injected = injector.injectSkills(event.systemPrompt);
-    return { systemPrompt: injected };
-  });
-
-  api.onAgentEnd((event: AgentEndEvent, _ctx: ExtensionContext) => {
-    forge.onAgentEnd(event.messages);
-  });
-
-  api.onToolExecutionEnd((_event: ToolExecutionEndEvent, _ctx: ExtensionContext) => {
-    // Could log skill-related tool usage here
-  });
-
-  // --- Register tools ---
-
-  api.registerTool({
-    name: 'skill_create',
-    label: 'Create Skill',
-    description: 'Create a new learned skill with name, description, category, triggers, and content',
-    parameters: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Skill name' },
-        description: { type: 'string', description: 'Brief description' },
-        category: { type: 'string', description: 'Category: testing, debugging, refactoring, api, ui, database, other' },
-        triggers: { type: 'array', items: { type: 'string' }, description: 'Keywords that trigger this skill' },
-        content: { type: 'string', description: 'Markdown content with steps and examples' },
-      },
-      required: ['name', 'description', 'content'],
+  const hooks: Hooks = {
+    // Inject relevant learned skills into the system prompt
+    "experimental.chat.system.transform": async (_input, output) => {
+      const context = output.system.join('\n');
+      const injected = injector.injectSkills(context);
+      if (injected !== context) {
+        output.system.push(injected.slice(context.length).trim());
+      }
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const result = skillCreate(params as any, skillStore);
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-    },
-  });
 
-  api.registerTool({
-    name: 'skill_search',
-    label: 'Search Skills',
-    description: 'Search the skill store by query string or category',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Search query' },
-        category: { type: 'string', description: 'Filter by category' },
-        limit: { type: 'number', description: 'Max results (default 10)' },
-      },
+    // Track tool executions (extensible for future skill-related logging)
+    "tool.execute.after": async (_input, _output) => {
+      // placeholder for future tool usage tracking
     },
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const result = skillSearch(params as any, skillStore);
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+
+    // Tools — the primary interface for the agent to manage skills
+    tool: {
+      skill_create: tool({
+        description: 'Create a new learned skill with name, description, category, triggers, and content',
+        args: {
+          name: tool.schema.string().describe('Skill name'),
+          description: tool.schema.string().describe('Brief description'),
+          category: tool.schema.string().describe('Category: testing, debugging, refactoring, api, ui, database, other'),
+          triggers: tool.schema.array(tool.schema.string()).describe('Keywords that trigger this skill'),
+          content: tool.schema.string().describe('Markdown content with steps and examples'),
+        },
+        async execute(args) {
+          const result = skillCreate(args, skillStore);
+          return JSON.stringify(result, null, 2);
+        },
+      }),
+
+      skill_search: tool({
+        description: 'Search the skill store by query string or category',
+        args: {
+          query: tool.schema.string().optional().describe('Search query'),
+          category: tool.schema.string().optional().describe('Filter by category'),
+          limit: tool.schema.number().optional().describe('Max results (default 10)'),
+        },
+        async execute(args) {
+          const result = skillSearch(args, skillStore);
+          return JSON.stringify(result, null, 2);
+        },
+      }),
+
+      skill_update: tool({
+        description: 'Update an existing skill by id',
+        args: {
+          id: tool.schema.number().describe('Skill id to update'),
+          name: tool.schema.string().optional().describe('New name'),
+          description: tool.schema.string().optional().describe('New description'),
+          category: tool.schema.string().optional().describe('New category'),
+          triggers: tool.schema.array(tool.schema.string()).optional().describe('New triggers'),
+          content: tool.schema.string().optional().describe('New content'),
+        },
+        async execute(args) {
+          const result = skillUpdate(args, skillStore);
+          return JSON.stringify(result, null, 2);
+        },
+      }),
+
+      skill_list: tool({
+        description: 'List all skills, optionally filtered by category and sorted',
+        args: {
+          category: tool.schema.string().optional().describe('Filter by category'),
+          sortBy: tool.schema.enum(['quality', 'usage', 'updated']).optional().describe('Sort criteria (default: quality)'),
+          limit: tool.schema.number().optional().describe('Max results (default 20)'),
+        },
+        async execute(args) {
+          const result = skillList(args, skillStore);
+          return JSON.stringify(result, null, 2);
+        },
+      }),
+
+      skill_score: tool({
+        description: 'Calculate quality scores for a skill using the rubric scorer',
+        args: {
+          id: tool.schema.number().describe('Skill id to score'),
+        },
+        async execute(args) {
+          const result = skillScore(args, skillStore, scorer);
+          return JSON.stringify(result, null, 2);
+        },
+      }),
+
+      skill_status: tool({
+        description: 'Show current skill store status including totals, categories, and quality metrics',
+        args: {},
+        async execute() {
+          return skillStatus(skillStore);
+        },
+      }),
+
+      skill_review: tool({
+        description: 'Run curator review to rescore, remove low-quality, and merge duplicate skills',
+        args: {},
+        async execute() {
+          return await skillReview(curator);
+        },
+      }),
+
+      skill_diff: tool({
+        description: 'Show recent skill changes sorted by update time',
+        args: {
+          limit: tool.schema.number().optional().describe('Max results (default 10)'),
+        },
+        async execute(args) {
+          return skillDiff(skillStore, args.limit ?? 10);
+        },
+      }),
+
+      skill_forge_review: tool({
+        description: 'Trigger the SkillForge to review conversation messages and extract learnable patterns as new skills',
+        args: {
+          messages: tool.schema.array(
+            tool.schema.object({
+              role: tool.schema.string().describe('Message role (user, assistant, system)'),
+              content: tool.schema.string().describe('Message content'),
+            }),
+          ).describe('Conversation messages to review for patterns'),
+        },
+        async execute(args) {
+          forge.onAgentEnd(args.messages);
+          return 'SkillForge review triggered. Use skill_list to see any newly created skills.';
+        },
+      }),
     },
-  });
-
-  api.registerTool({
-    name: 'skill_update',
-    label: 'Update Skill',
-    description: 'Update an existing skill by id',
-    parameters: {
-      type: 'object',
-      properties: {
-        id: { type: 'number', description: 'Skill id to update' },
-        name: { type: 'string', description: 'New name' },
-        description: { type: 'string', description: 'New description' },
-        category: { type: 'string', description: 'New category' },
-        triggers: { type: 'array', items: { type: 'string' }, description: 'New triggers' },
-        content: { type: 'string', description: 'New content' },
-      },
-      required: ['id'],
-    },
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const result = skillUpdate(params as any, skillStore);
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-    },
-  });
-
-  api.registerTool({
-    name: 'skill_list',
-    label: 'List Skills',
-    description: 'List all skills, optionally filtered by category and sorted',
-    parameters: {
-      type: 'object',
-      properties: {
-        category: { type: 'string', description: 'Filter by category' },
-        sortBy: { type: 'string', enum: ['quality', 'usage', 'updated'], description: 'Sort criteria' },
-        limit: { type: 'number', description: 'Max results (default 20)' },
-      },
-    },
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const result = skillList(params as any, skillStore);
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-    },
-  });
-
-  api.registerTool({
-    name: 'skill_score',
-    label: 'Score Skill',
-    description: 'Calculate quality scores for a skill using the rubric scorer',
-    parameters: {
-      type: 'object',
-      properties: {
-        id: { type: 'number', description: 'Skill id to score' },
-      },
-      required: ['id'],
-    },
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const result = skillScore(params as any, skillStore, scorer);
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-    },
-  });
-
-  // --- Register commands ---
-
-  api.registerCommand('skill-status', (_ctx: ExtensionContext) => {
-    return skillStatus(skillStore);
-  });
-
-  api.registerCommand('skill-review', async (_ctx: ExtensionContext) => {
-    return await skillReview(curator);
-  });
-
-  api.registerCommand('skill-diff', (_ctx: ExtensionContext, ...args: string[]) => {
-    const limit = args[0] ? parseInt(args[0], 10) : 10;
-    return skillDiff(skillStore, limit);
-  });
-
-  const cleanup = () => {
-    curator.stop();
-    closeDatabase();
   };
 
-  return {
-    deps: { config, skillStore, scorer, forge, curator, injector },
-    cleanup,
-  };
-}
+  return hooks;
+};
 
-/**
- * Plugin factory. The host application calls this with its ExtensionAPI.
- */
-export default function createSelfImprovePlugin(api: ExtensionAPI): { cleanup: () => void } {
-  const { cleanup } = wirePlugin(api);
-  return { cleanup };
-}
-
-// Also export as named for flexibility
-export { createSelfImprovePlugin };
+export default SelfImprovePlugin;
