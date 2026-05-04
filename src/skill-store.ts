@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { Database, SQLQueryBindings } from 'bun:sqlite';
 import type { PluginConfig } from './config/schema';
 import { RubricScorer } from './rubric-scorer';
 
@@ -21,7 +21,7 @@ export type NewSkill = Omit<Skill, 'id' | 'created_at' | 'updated_at'>;
 
 export class SkillStore {
   constructor(
-    private db: Database.Database,
+    private db: Database,
     private config: PluginConfig,
     private scorer: RubricScorer,
   ) {}
@@ -51,7 +51,7 @@ export class SkillStore {
 
   findSkills(query: { category?: string; minQuality?: number }): Skill[] {
     const clauses: string[] = [];
-    const params: unknown[] = [];
+    const params: SQLQueryBindings[] = [];
 
     if (query.category) {
       clauses.push('category = ?');
@@ -76,7 +76,7 @@ export class SkillStore {
 
     this.db.prepare(
       `UPDATE skills SET ${setClauses.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-    ).run(...values, id);
+    ).run(...values as SQLQueryBindings[], id);
   }
 
   deleteSkill(id: number): void {

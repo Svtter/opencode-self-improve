@@ -1,9 +1,9 @@
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { homedir } from 'os';
 import { mkdirSync, existsSync } from 'fs';
 import { dirname } from 'path';
 
-let db: Database.Database | null = null;
+let db: Database | null = null;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS skills (
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS skill_usage_log (
 );
 `;
 
-export function initializeDatabase(dbPath: string): Database.Database {
+export function initializeDatabase(dbPath: string): Database {
   const resolved = dbPath.replace('~', homedir());
 
   // Ensure parent directory exists
@@ -47,14 +47,14 @@ export function initializeDatabase(dbPath: string): Database.Database {
   }
 
   db = new Database(resolved);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA foreign_keys = ON");
   db.exec(SCHEMA);
 
   return db;
 }
 
-export function getDb(): Database.Database {
+export function getDb(): Database {
   if (!db) throw new Error('Database not initialized. Call initializeDatabase() first.');
   return db;
 }
