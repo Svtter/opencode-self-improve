@@ -1,5 +1,8 @@
 import type { SkillStore, Skill } from './skill-store';
 import type { PluginConfig } from './config/schema';
+import { createLogger } from './logger';
+
+const log = createLogger('SkillInjector');
 
 export class SkillInjector {
   constructor(
@@ -13,6 +16,7 @@ export class SkillInjector {
     const relevantSkills = this.findRelevantSkills(systemPrompt);
     if (relevantSkills.length === 0) return systemPrompt;
 
+    log.info('injecting skills into prompt', { count: relevantSkills.length, skills: relevantSkills.map(s => s.name) });
     const skillsBlock = relevantSkills
       .map(s => {
         const qualityPct = Math.round(s.quality_score * 100);

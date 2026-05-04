@@ -1,4 +1,5 @@
 export interface PluginConfig {
+  logLevel?: 'debug' | 'info' | 'warn' | 'error';
   skillForge: {
     enabled: boolean;
     model: 'haiku' | 'sonnet' | 'opus';

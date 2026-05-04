@@ -18,6 +18,7 @@ export function loadConfig(): PluginConfig {
 
 export function getDefaultConfig(): PluginConfig {
   return {
+    logLevel: 'info',
     skillForge: {
       enabled: true,
       model: 'haiku',
